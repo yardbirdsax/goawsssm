@@ -82,7 +82,7 @@ func CreateSsmTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, 
 
 	args := []string{
 		string(sessionOutputData),
-		"", // region, will default to profile
+		input.regionName,
 		"StartSession",
 		"", // profile name
 		string(sessionInputData),
