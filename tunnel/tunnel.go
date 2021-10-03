@@ -1,47 +1,67 @@
 package tunnel
 
 import (
-	//"github.com/stretchr/testify/assert"
 	"context"
 	"fmt"
 	"io"
 	"os/exec"
 	"sync"
-	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"gopkg.in/square/go-jose.v2/json"
 
-	"github.com/gruntwork-io/terratest/modules/logger"
-
 	"github.com/mitchellh/iochan"
+
+	"github.com/yardbirdsax/goawsssm/logging"
 )
 
-func CreateSsmTunnelE(tunnelOpen chan bool, tunnelCanClose chan bool, t *testing.T, instanceId string, port int, region string) (string, error) {
+type CreateSSMTunnelInput struct {
+	// A channel to signal the caller that the tunnel has been opened.
+	tunnelIsOpen chan bool
+	// A channel to receive a signal that the tunnel can be closed.
+	tunnelCanClose chan bool
+	// The AWS Instance ID that the connection should be made to.
+	instanceID string
+	// The remote port number for the tunnel.
+	remotePortNumber int
+	// The local port number for the tunnel.
+	localPortNumber int
+	// The AWS region where the instance resides.
+	regionName string
+}
 
+// CreateSSMTunnelE is used to create an SSM based port-forwarding tunnel to an AWS EC2 instance. It will log various tidbits if the context input includes a key call "logger" 
+// that matches the logging.Logger interface.
+func CreateSsmTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, error) {
+
+	logger := ctx.Value(logging.LOGGER_CONTEXT_KEY).(logging.Logger)
 	
-	logger.Logf(t, "Loading AWS config")
+	logging.Infof(logger, "Loading AWS config")
+
 	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
 		return "", err
 	}
-	cfg.Region = region
+	cfg.Region = input.regionName
 
 	documentName := "AWS-StartPortForwardingSession"
-	portNumberStr := fmt.Sprintf("%v", port)
+	remotePortNumberStr := fmt.Sprintf("%v", input.remotePortNumber)
+	localPortNumberStr := fmt.Sprintf("%v", input.localPortNumber)
+	instanceID := input.instanceID
 	sessionInput := &ssm.StartSessionInput{
-		Target:       &instanceId,
+		Target:       &instanceID,
 		DocumentName: &documentName,
 		Parameters: map[string][]string{
-			"portNumber":      {portNumberStr},
-			"localPortNumber": {portNumberStr},
+			"portNumber":      {remotePortNumberStr},
+			"localPortNumber": {localPortNumberStr},
 		},
 	}
 
 	ssmClient := ssm.NewFromConfig(cfg)
 	sessionOutput, err := ssmClient.StartSession(context.Background(), sessionInput)
 	if err != nil {
+		input.tunnelIsOpen <- false
 		return "", err
 	}
 	termSessionInput := ssm.TerminateSessionInput{
@@ -51,10 +71,12 @@ func CreateSsmTunnelE(tunnelOpen chan bool, tunnelCanClose chan bool, t *testing
 
 	sessionOutputData, err := json.Marshal(sessionOutput)
 	if err != nil {
+		input.tunnelIsOpen <- false
 		return *sessionOutput.SessionId, err
 	}
 	sessionInputData, err := json.Marshal(sessionInput)
 	if err != nil {
+		input.tunnelIsOpen <- false
 		return *sessionOutput.SessionId, err
 	}
 
@@ -78,9 +100,10 @@ func CreateSsmTunnelE(tunnelOpen chan bool, tunnelCanClose chan bool, t *testing
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 
-	logger.Logf(t, "Starting session manager plugin process.")
+	logging.Infof(logger, "Starting session manager plugin process.")
 	err = cmd.Start()
 	if err != nil {
+		input.tunnelIsOpen <- false
 		return *sessionOutput.SessionId, err
 	}
 
@@ -94,24 +117,24 @@ func CreateSsmTunnelE(tunnelOpen chan bool, tunnelCanClose chan bool, t *testing
 		defer streamWg.Done()
 
 		for line := range ch {
-			logger.Logf(t, line)
+			logging.Infof(logger, line)
 		}
 	}
 
 	go streamFunc(stdOutChan)
 	go streamFunc(stdErrChan)
 
-	logger.Logf(t, "Senging signal that tunnel is open.")
-	tunnelOpen <- true
+	logging.Infof(logger, "Senging signal that tunnel is open.")
+	input.tunnelIsOpen <- true
 
-	logger.Logf(t, "Waiting for signal that tunnel can close.")
-	<-tunnelCanClose
-	logger.Logf(t, "Received signal that tunnel can close.")
+	logging.Infof(logger, "Waiting for signal that tunnel can close.")
+	<-input.tunnelCanClose
+	logging.Infof(logger, "Received signal that tunnel can close.")
 
 	cmd.Process.Kill()
 
-	logger.Logf(t, "Sending signal that tunnel has been closed.")
-	tunnelOpen <- false
+	logging.Infof(logger, "Sending signal that tunnel has been closed.")
+	input.tunnelIsOpen <- false
 
 	return *sessionOutput.SessionId, err
 
