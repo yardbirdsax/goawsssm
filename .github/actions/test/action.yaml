@@ -1,0 +1,17 @@
+name: "Run Go Tests"
+description: Runs all tests for the repository.
+inputs:
+  go-version:
+    description: The version of Golang to use
+    required: true
+    default: "1.16"
+runs:
+  using: composite
+  steps:
+    - name: Install Golang
+      uses: actions/setup-go@v2
+      with:
+        go-version: ${{ inputs.go-version }}
+    - name: Run AWS integration test
+      shell: bash
+      run: go test -v -count 1 ./integration_test/...

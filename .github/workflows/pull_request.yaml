@@ -1,0 +1,17 @@
+name: "Pull Request"
+on:
+  pull_request:
+    branches:
+      - trunk
+  workflow_dispatch:
+jobs:
+  vaultTest:
+    name: Execute integration tests
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Run Go tests
+        uses: ./.github/actions/test
+        with:
+          go-version: 1.16

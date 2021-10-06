@@ -6,6 +6,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
@@ -18,37 +19,45 @@ import (
 
 type CreateSSMTunnelInput struct {
 	// A channel to signal the caller that the tunnel has been opened.
-	tunnelIsOpen chan bool
+	TunnelIsOpen chan bool
 	// A channel to receive a signal that the tunnel can be closed.
-	tunnelCanClose chan bool
+	TunnelCanClose chan bool
 	// The AWS Instance ID that the connection should be made to.
-	instanceID string
+	InstanceID string
 	// The remote port number for the tunnel.
-	remotePortNumber int
+	RemotePortNumber int
 	// The local port number for the tunnel.
-	localPortNumber int
+	LocalPortNumber int
 	// The AWS region where the instance resides.
-	regionName string
+	RegionName string
+	// The maximum number of retries to open the tunnel.
+	MaxRetries int
+	// The wait time between retries.
+	RetryWaitInterval time.Duration
 }
 
 // CreateSSMTunnelE is used to create an SSM based port-forwarding tunnel to an AWS EC2 instance. It will log various tidbits if the context input includes a key call "logger" 
 // that matches the logging.Logger interface.
-func CreateSsmTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, error) {
+func CreateSSMTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, error) {
 
+	if input.MaxRetries == 0 {
+		input.MaxRetries = 1
+	}
+	
 	logger := ctx.Value(logging.LOGGER_CONTEXT_KEY).(logging.Logger)
 	
 	logging.Infof(logger, "Loading AWS config")
 
-	cfg, err := config.LoadDefaultConfig(context.Background())
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return "", err
 	}
-	cfg.Region = input.regionName
+	cfg.Region = input.RegionName
 
 	documentName := "AWS-StartPortForwardingSession"
-	remotePortNumberStr := fmt.Sprintf("%v", input.remotePortNumber)
-	localPortNumberStr := fmt.Sprintf("%v", input.localPortNumber)
-	instanceID := input.instanceID
+	remotePortNumberStr := fmt.Sprintf("%v", input.RemotePortNumber)
+	localPortNumberStr := fmt.Sprintf("%v", input.LocalPortNumber)
+	instanceID := input.InstanceID
 	sessionInput := &ssm.StartSessionInput{
 		Target:       &instanceID,
 		DocumentName: &documentName,
@@ -59,30 +68,41 @@ func CreateSsmTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, 
 	}
 
 	ssmClient := ssm.NewFromConfig(cfg)
-	sessionOutput, err := ssmClient.StartSession(context.Background(), sessionInput)
-	if err != nil {
-		input.tunnelIsOpen <- false
+
+	var sessionOutput *ssm.StartSessionOutput
+	for retryCount := 1; retryCount <= input.MaxRetries; retryCount ++ {
+		sessionOutput, err = ssmClient.StartSession(ctx, sessionInput)
+		if err != nil {
+			logger.Infof("Tunnel could not be opened, error is: %s. Retry count is %d, max count is %d.", err, retryCount, input.MaxRetries)
+		}
+		if retryCount < input.MaxRetries {
+			time.Sleep(input.RetryWaitInterval)
+		}
+	}
+	if sessionOutput == nil {
+		input.TunnelIsOpen <- false
 		return "", err
 	}
+
 	termSessionInput := ssm.TerminateSessionInput{
 		SessionId: sessionOutput.SessionId,
 	}
-	defer ssmClient.TerminateSession(context.Background(), &termSessionInput)
+	defer ssmClient.TerminateSession(ctx, &termSessionInput)
 
 	sessionOutputData, err := json.Marshal(sessionOutput)
 	if err != nil {
-		input.tunnelIsOpen <- false
+		input.TunnelIsOpen <- false
 		return *sessionOutput.SessionId, err
 	}
 	sessionInputData, err := json.Marshal(sessionInput)
 	if err != nil {
-		input.tunnelIsOpen <- false
+		input.TunnelIsOpen <- false
 		return *sessionOutput.SessionId, err
 	}
 
 	args := []string{
 		string(sessionOutputData),
-		input.regionName,
+		input.RegionName,
 		"StartSession",
 		"", // profile name
 		string(sessionInputData),
@@ -103,7 +123,7 @@ func CreateSsmTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, 
 	logging.Infof(logger, "Starting session manager plugin process.")
 	err = cmd.Start()
 	if err != nil {
-		input.tunnelIsOpen <- false
+		input.TunnelIsOpen <- false
 		return *sessionOutput.SessionId, err
 	}
 
@@ -125,16 +145,16 @@ func CreateSsmTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, 
 	go streamFunc(stdErrChan)
 
 	logging.Infof(logger, "Senging signal that tunnel is open.")
-	input.tunnelIsOpen <- true
+	input.TunnelIsOpen <- true
 
 	logging.Infof(logger, "Waiting for signal that tunnel can close.")
-	<-input.tunnelCanClose
+	<-input.TunnelCanClose
 	logging.Infof(logger, "Received signal that tunnel can close.")
 
 	cmd.Process.Kill()
 
 	logging.Infof(logger, "Sending signal that tunnel has been closed.")
-	input.tunnelIsOpen <- false
+	input.TunnelIsOpen <- false
 
 	return *sessionOutput.SessionId, err
 
