@@ -20,7 +20,7 @@ jobs:
           aws_iam_role_arn: "arn:aws:iam::068845349622:role/GHA-yardbirdsax-goawsssm"
           aws_default_region: us-east-2
       - name: debug
-        run: cat $AWS_WEB_IDENTITY_TOKEN_FILE
+        run: "curl -H \"Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN\" \"$ACTIONS_ID_TOKEN_REQUEST_URL\""
         shell: bash
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v1
