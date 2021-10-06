@@ -11,6 +11,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+      - name: Acquire AWS credentials
+        uses: "yardbirdsax/action-aws-assume-federated-role@0.0.1"
+        with:
+          aws_iam_role_arn: "arn:aws:iam::068845349622:role/GHA-yardbirdsax-goawsssm"
+          aws_default_region: us-east-2
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.0.8
+          terraform_wrapper: false
       - name: Run Go tests
         uses: ./.github/actions/test
         with:
