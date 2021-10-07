@@ -15,10 +15,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Acquire AWS credentials
-        uses: "yardbirdsax/action-aws-assume-federated-role@0.0.1"
+        uses: zarnovican/aws-oidc-login-action@v1.0.2
         with:
-          aws_iam_role_arn: "arn:aws:iam::068845349622:role/GHA-yardbirdsax-goawsssm"
-          aws_default_region: us-east-2
+          role: "arn:aws:iam::068845349622:role/GHA-yardbirdsax-goawsssm"
+          aws-region: us-east-2
+          client-id: sigstore
       - name: debug
         run: "curl -H \"Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN\" \"$ACTIONS_ID_TOKEN_REQUEST_URL\""
         shell: bash
