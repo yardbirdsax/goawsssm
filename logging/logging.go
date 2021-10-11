@@ -1,5 +1,7 @@
 package logging
 
+import "context"
+
 const (
 	LOGGER_CONTEXT_KEY string = "logger"
 )
@@ -13,6 +15,16 @@ type Logger interface {
 	Warn(args ...interface{})
 	Errorf(format string, args ...interface{})
 	Error(args ...interface{})
+}
+
+func GetLogger(ctx context.Context) (logger Logger) {
+	logContext := ctx.Value(LOGGER_CONTEXT_KEY)
+	if logContext != nil {
+		logger = logContext.(Logger)
+	} else {
+		logger = nil
+	}
+	return
 }
 
 func Debugf(logger Logger, format string, args ...interface{}) {

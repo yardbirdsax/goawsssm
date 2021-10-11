@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	awsssm "github.com/aws/aws-sdk-go-v2/service/ssm"
 	"gopkg.in/square/go-jose.v2/json"
 
 	"github.com/mitchellh/iochan"
 
 	"github.com/yardbirdsax/goawsssm/logging"
+	"github.com/yardbirdsax/goawsssm/session"
 )
 
 type CreateSSMTunnelInput struct {
@@ -58,20 +59,30 @@ func CreateSSMTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, 
 	remotePortNumberStr := fmt.Sprintf("%v", input.RemotePortNumber)
 	localPortNumberStr := fmt.Sprintf("%v", input.LocalPortNumber)
 	instanceID := input.InstanceID
-	sessionInput := &ssm.StartSessionInput{
+	startSessionInput := session.StartSessionInput{
+		InstanceID: instanceID,
+		MaxRetries: input.MaxRetries,
+		RetryWaitInterval: input.RetryWaitInterval,
+		DocumentName: documentName,
+		Parameters: map[string][]string{
+			"portNumber":      {remotePortNumberStr},
+			"localPortNumber": {localPortNumberStr},
+		},
+	}
+	sessionInput := &awsssm.StartSessionInput{
 		Target:       &instanceID,
 		DocumentName: &documentName,
 		Parameters: map[string][]string{
 			"portNumber":      {remotePortNumberStr},
 			"localPortNumber": {localPortNumberStr},
 		},
-	}
+	} 
 
-	ssmClient := ssm.NewFromConfig(cfg)
+	ssmClient := awsssm.NewFromConfig(cfg)
 
-	var sessionOutput *ssm.StartSessionOutput
+	var sessionOutput *awsssm.StartSessionOutput
 	for retryCount := 1; retryCount <= input.MaxRetries; retryCount ++ {
-		sessionOutput, err = ssmClient.StartSession(ctx, sessionInput)
+		sessionOutput, err = session.Start(ctx, ssmClient, startSessionInput)
 		if err != nil {
 			logger.Infof("Tunnel could not be opened, error is: %s. Retry count is %d, max count is %d.", err, retryCount, input.MaxRetries)
 		}
@@ -84,7 +95,7 @@ func CreateSSMTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, 
 		return "", err
 	}
 
-	termSessionInput := ssm.TerminateSessionInput{
+	termSessionInput := awsssm.TerminateSessionInput{
 		SessionId: sessionOutput.SessionId,
 	}
 	defer ssmClient.TerminateSession(ctx, &termSessionInput)
