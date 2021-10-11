@@ -80,16 +80,7 @@ func CreateSSMTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, 
 
 	ssmClient := awsssm.NewFromConfig(cfg)
 
-	var sessionOutput *awsssm.StartSessionOutput
-	for retryCount := 1; retryCount <= input.MaxRetries; retryCount ++ {
-		sessionOutput, err = session.Start(ctx, ssmClient, startSessionInput)
-		if err != nil {
-			logger.Infof("Tunnel could not be opened, error is: %s. Retry count is %d, max count is %d.", err, retryCount, input.MaxRetries)
-		}
-		if retryCount < input.MaxRetries {
-			time.Sleep(input.RetryWaitInterval)
-		}
-	}
+	sessionOutput, err := session.Start(ctx, ssmClient, startSessionInput)
 	if sessionOutput == nil {
 		input.TunnelIsOpen <- false
 		return "", err

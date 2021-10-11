@@ -45,6 +45,7 @@ func Start(ctx context.Context, client client.SSMClient, input StartSessionInput
 		output, err = client.StartSession(ctx, startSessionInput)
 		if err != nil {
 			logging.Errorf(logger, "Error attempting to start SSM session: %v; attempt %d of %d.", err, currentRetryCount, input.MaxRetries)
+			time.Sleep(input.RetryWaitInterval)
 		} else {
 			break
 		}

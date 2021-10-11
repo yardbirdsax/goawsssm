@@ -27,6 +27,7 @@ func TestStart(t *testing.T) {
 	}
 	maxRetries := 5
 	retryWaitInterval := 5*time.Second
+	expectedDurationSeconds := retryWaitInterval.Seconds() * float64(maxRetries - 1)
 	ctx := context.TODO()
 	startSesionInput := &StartSessionInput{
 		InstanceID: instanceID,
@@ -60,7 +61,10 @@ func TestStart(t *testing.T) {
 		},
 	)
 
+	timeStarted := time.Now()
 	output, err := Start(ctx, mockClient, *startSesionInput)
+	timeAfter := time.Now()
+	actualDurationSeconds := timeAfter.Sub(timeStarted).Seconds()
 
 	ctrl.Finish()
 	assert.NotNil(t, output)
@@ -68,4 +72,5 @@ func TestStart(t *testing.T) {
 	assert.Equal(t, sessionID, *(output.SessionId))
 	assert.Equal(t, streamURL, *(output.StreamUrl))
 	assert.Equal(t, tokenValue, *(output.TokenValue))
+	assert.GreaterOrEqual(t, actualDurationSeconds, expectedDurationSeconds, "Function call did not take the minimum time expected based on minimum retry count and wait duration.")
 }
