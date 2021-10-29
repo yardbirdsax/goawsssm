@@ -3,14 +3,16 @@ package session
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	gomock "github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	//"github.com/yardbirdsax/goawsssm/client"
+	"github.com/stretchr/testify/require"
 	"github.com/yardbirdsax/goawsssm/mock"
+	"gopkg.in/square/go-jose.v2/json"
 )
 
 
@@ -73,4 +75,62 @@ func TestStart(t *testing.T) {
 	assert.Equal(t, streamURL, *(output.StreamUrl))
 	assert.Equal(t, tokenValue, *(output.TokenValue))
 	assert.GreaterOrEqual(t, actualDurationSeconds, expectedDurationSeconds, "Function call did not take the minimum time expected based on minimum retry count and wait duration.")
+}
+
+func TestGetPluginCommand(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockExec := mock.NewMockExec(ctrl)
+	sessionId := "abc123456"
+	streamUrl := "http://stream"
+	tokenValue := "token"
+	startSessionOutput := &ssm.StartSessionOutput{
+		SessionId: &sessionId,
+		StreamUrl: &streamUrl,
+		TokenValue: &tokenValue,
+	}
+	target := "target"
+	documentName := "document"
+	parameters := map[string][]string{
+		"something": {"something"},
+	}
+	startSessionInput := &ssm.StartSessionInput{
+		Target: &target,
+		DocumentName: &documentName,
+		Parameters: parameters,
+	}
+	startPluginInput := GetPluginCommandInput{
+		StartSessionOuput: startSessionOutput,
+		RegionName: "region",
+		AWSProfileName: "profile",
+		StartSessionInput: startSessionInput,
+	}
+	expectedName := "session-manager-plugin"
+	sessionOutputData, err := json.Marshal(startSessionOutput)
+	require.Nil(t, err)
+	sessionInputData, err := json.Marshal(startSessionInput)
+	require.Nil(t, err)
+	expectedArgs := []string{
+		string(sessionOutputData),
+		startPluginInput.RegionName,
+		"StartSession",
+		startPluginInput.AWSProfileName,
+		string(sessionInputData),
+		*startSessionOutput.StreamUrl,
+	}
+	mockExec.EXPECT().Command(expectedName, expectedArgs).Times(1).DoAndReturn(
+		func(expectedName string, expectedArgs []string) (cmd *exec.Cmd) {
+			cmdArgs := []string{
+				"-c",
+				"\"while true; do echo 'hello there'; done;\"",
+			}
+			cmd = exec.Command("bash", cmdArgs...)
+			return
+		},
+	)
+	ctx := context.Background()
+
+	_, err = GetPluginCommand(ctx, mockExec, startPluginInput)
+
+	assert.Nil(t, err)
+	ctrl.Finish()
 }

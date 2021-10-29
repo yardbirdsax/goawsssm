@@ -4,16 +4,15 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	awsssm "github.com/aws/aws-sdk-go-v2/service/ssm"
-	"gopkg.in/square/go-jose.v2/json"
 
 	"github.com/mitchellh/iochan"
 
+	"github.com/yardbirdsax/goawsssm/client"
 	"github.com/yardbirdsax/goawsssm/logging"
 	"github.com/yardbirdsax/goawsssm/session"
 )
@@ -91,29 +90,19 @@ func CreateSSMTunnelE(ctx context.Context, input CreateSSMTunnelInput) (string, 
 	}
 	defer ssmClient.TerminateSession(ctx, &termSessionInput)
 
-	sessionOutputData, err := json.Marshal(sessionOutput)
-	if err != nil {
-		input.TunnelIsOpen <- false
-		return *sessionOutput.SessionId, err
-	}
-	sessionInputData, err := json.Marshal(sessionInput)
-	if err != nil {
-		input.TunnelIsOpen <- false
-		return *sessionOutput.SessionId, err
-	}
-
-	args := []string{
-		string(sessionOutputData),
-		input.RegionName,
-		"StartSession",
-		"", // profile name
-		string(sessionInputData),
-		*sessionOutput.StreamUrl,
-	}
-
 	// This logic borrowed heavily from Hashicorp Packer's AWS plugin, see https://github.com/hashicorp/packer-plugin-amazon/blob/main/builder/common/ssm/session.go and
 	// https://github.com/hashicorp/packer-plugin-sdk/blob/main/shell-local/localexec/run_and_stream.go.
-	cmd := exec.Command("session-manager-plugin", args...)
+	getPluginCommandInput := session.GetPluginCommandInput{
+		StartSessionOuput: sessionOutput,
+		RegionName: cfg.Region,
+		AWSProfileName: "",
+		StartSessionInput: sessionInput,
+	}
+	cmd, err := session.GetPluginCommand(ctx, client.Executor{}, getPluginCommandInput)
+	if err != nil {
+		input.TunnelIsOpen <- false
+		return *sessionOutput.SessionId, err
+	}
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
 	defer stdoutW.Close()

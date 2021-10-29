@@ -2,11 +2,12 @@ package session
 
 import (
 	"context"
+	"os/exec"
 	"time"
 
 	//"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
-	//"gopkg.in/square/go-jose.v2/json"
+	"gopkg.in/square/go-jose.v2/json"
 
 	//"github.com/mitchellh/iochan"
 
@@ -50,5 +51,42 @@ func Start(ctx context.Context, client client.SSMClient, input StartSessionInput
 			break
 		}
 	}
+	return
+}
+
+type GetPluginCommandInput struct {
+	StartSessionOuput *ssm.StartSessionOutput
+
+	RegionName string
+	
+	AWSProfileName string
+
+	StartSessionInput *ssm.StartSessionInput
+}
+
+func GetPluginCommand(ctx context.Context, executor client.Exec, input GetPluginCommandInput) (cmd *exec.Cmd, err error) {
+	logger := logging.GetLogger(ctx)
+	logging.Infof(logger, "Hello there")
+
+	sessionOutputData, err := json.Marshal(input.StartSessionOuput)
+	if err != nil {
+		return
+	}
+	sessionInputData, err := json.Marshal(input.StartSessionInput)
+	if err != nil {
+		return
+	}
+
+	args := []string{
+		string(sessionOutputData),
+		input.RegionName,
+		"StartSession",
+		input.AWSProfileName,
+		string(sessionInputData),
+		*input.StartSessionOuput.StreamUrl,
+	}
+	
+	cmd = executor.Command("session-manager-plugin", args)
+
 	return
 }
