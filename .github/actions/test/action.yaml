@@ -12,6 +12,9 @@ runs:
       uses: actions/setup-go@v2
       with:
         go-version: ${{ inputs.go-version }}
+    - name: Run unit tests
+      shell: bash
+      run: make test
     - name: Run AWS integration test
       shell: bash
-      run: go test -v -count 1 ./integration_test/...
+      run: make integration-test
